@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "secure-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "secure-app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "secure-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Force pod restart on config changes
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "secure-app.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # ── Image pull secrets ──────────────────────────────────
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      # ── Service account ─────────────────────────────────────
+      serviceAccountName: {{ include "secure-app.serviceAccountName" . }}
+
+      # ── Do NOT auto-mount service account tokens ────────────
+      # Trivy flags automountServiceAccountToken: true as HIGH
+      automountServiceAccountToken: false
+
+      # ── Pod-level security context ──────────────────────────
+      # runAsNonRoot + seccompProfile are required to pass Trivy
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.podSecurityContext.runAsUser }}
+        runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+        fsGroup: {{ .Values.podSecurityContext.fsGroup }}
+        seccompProfile:
+          type: {{ .Values.podSecurityContext.seccompProfile.type }}
+
+      # ── Host namespace isolation ─────────────────────────────
+      # Trivy flags hostNetwork, hostPID, hostIPC as CRITICAL/HIGH
+      hostNetwork: {{ .Values.hostNetwork }}
+      hostPID: {{ .Values.hostPID }}
+      hostIPC: {{ .Values.hostIPC }}
+
+      # ── Volumes ─────────────────────────────────────────────
+      # emptyDir volumes provide writable scratch space when
+      # readOnlyRootFilesystem: true is set on the container
+      volumes:
+        {{- toYaml .Values.extraVolumes | nindent 8 }}
+
+      containers:
+        - name: {{ .Chart.Name }}
+          # ── Container security context ──────────────────────
+          # Every field below is checked by Trivy config scanner
+          securityContext:
+            allowPrivilegeEscalation: false   # HIGH — must be false
+            readOnlyRootFilesystem: true       # HIGH — prevents runtime writes
+            runAsNonRoot: true                 # HIGH — never run as root
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            privileged: false                  # CRITICAL — never privileged
+            capabilities:
+              drop:
+                - ALL                          # HIGH — drop all Linux capabilities
+            seccompProfile:
+              type: {{ .Values.securityContext.seccompProfile.type }}
+
+          # ── Image ───────────────────────────────────────────
+          # Pinned tag — Trivy flags "latest" as a misconfiguration
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+              # Never set hostPort — binds directly to the node's network
+              # hostPort is intentionally omitted
+
+          # ── Resource limits ─────────────────────────────────
+          # Trivy flags missing limits as MEDIUM/HIGH
+          resources:
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+
+          # ── Probes ──────────────────────────────────────────
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+
+          # ── Volume mounts ────────────────────────────────────
+          # Required because readOnlyRootFilesystem: true blocks
+          # writes to the container filesystem
+          volumeMounts:
+            {{- toYaml .Values.extraVolumeMounts | nindent 12 }}
+
+      # ── Scheduling ──────────────────────────────────────────
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

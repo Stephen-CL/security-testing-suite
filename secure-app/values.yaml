@@ -1,0 +1,159 @@
+# =============================================================================
+# values.yaml — secure-app
+# All defaults are set to pass Trivy HIGH/CRITICAL config scans.
+# Override per environment as needed, but do not loosen security contexts.
+# =============================================================================
+
+replicaCount: 2
+
+image:
+  repository: my-org/secure-app
+  # Pin to a specific digest or immutable tag — never "latest"
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Service account ──────────────────────────────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  # Do NOT auto-mount — explicitly mount only where needed
+  automountServiceAccountToken: false
+
+# ── Pod-level security context ────────────────────────────────
+# Applied to every container in the pod.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# ── Container-level security context ─────────────────────────
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  privileged: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# ── Resource limits (required — Trivy flags missing limits) ──
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# ── Service ──────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 8080
+  # Never use hostPort — binds directly to the node
+  targetPort: 8080
+
+# ── Networking ───────────────────────────────────────────────
+# hostNetwork and hostPID must be false to pass Trivy scans
+hostNetwork: false
+hostPID: false
+hostIPC: false
+
+# ── Network policy ───────────────────────────────────────────
+networkPolicy:
+  enabled: true
+  # Deny all ingress by default; allow only what is declared below
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+# ── Probes ───────────────────────────────────────────────────
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+# ── Ingress ──────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: secure-app.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: secure-app-tls
+      hosts:
+        - secure-app.example.com
+
+# ── Autoscaling ──────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# ── Pod disruption budget ────────────────────────────────────
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ── Extra volumes (e.g. writable tmp dir for readOnlyRootFilesystem) ──
+extraVolumes:
+  - name: tmp
+    emptyDir: {}
+  - name: app-cache
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: app-cache
+    mountPath: /app/cache
+
+# ── Labels & annotations ─────────────────────────────────────
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

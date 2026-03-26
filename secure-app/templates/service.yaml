@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "secure-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "secure-app.labels" . | nindent 4 }}
+spec:
+  # ClusterIP avoids exposing the service directly on a node port
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "secure-app.selectorLabels" . | nindent 4 }}

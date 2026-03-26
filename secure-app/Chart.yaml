@@ -1,0 +1,6 @@
+apiVersion: v2
+name: secure-app
+description: A security-hardened Helm chart that passes Trivy config scans
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
